@@ -5,14 +5,11 @@ from discord.ext import commands
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 from utils.chunking import split_file_into_chunks
+from utils.compression import compress_chunk
 from utils.retry import retry_with_backoff
-from dotenv import load_dotenv
+from utils.settings import load_user_settings, save_user_settings
 import asyncio
 
-# Load environment variables
-load_dotenv()
-DISCORD_USER_ID = os.getenv("DISCORD_USER_ID")
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", 8388608))
 
 class FileSplitter(commands.Cog):
     def __init__(self, bot):
@@ -20,14 +17,24 @@ class FileSplitter(commands.Cog):
         self.temp_dir = "./data/temp_storage/"
         os.makedirs(self.temp_dir, exist_ok=True)
 
-    @app_commands.command(name="split_file", description="Split and upload a file.")
+    async def get_settings(self, user_id):
+        """Fetch user settings from settings file (or use defaults)."""
+        return await load_user_settings(user_id)
+
+    async def save_settings(self, user_id, settings):
+        """Save user settings to the settings file."""
+        await save_user_settings(user_id, settings)
+
+    @app_commands.command(name="split_file", description="Split, compress, and upload a file.")
     async def split_file(
-        self, interaction: discord.Interaction
+        self, interaction: discord.Interaction, compress: bool = None, chunk_size: str = None
     ):
         await interaction.response.send_message("Opening file selection dialog. Please wait...", ephemeral=True)
 
-        # Use default chunk size from .env
-        chunk_size = CHUNK_SIZE
+        # Fetch user settings, falling back to defaults
+        settings = await self.get_settings(interaction.user.id)
+        compress = compress if compress is not None else settings["compress"]
+        chunk_size = chunk_size if chunk_size else settings["chunk_size"]
 
         # File selection dialog
         root = Tk()
@@ -44,7 +51,11 @@ class FileSplitter(commands.Cog):
         file_size = os.path.getsize(file_path)
 
         # Chunking the file
-        chunks = split_file_into_chunks(file_path, chunk_size, self.temp_dir)
+        chunks = split_file_into_chunks(file_path, int(chunk_size), self.temp_dir)
+
+        # Compression if selected
+        if compress:
+            chunks = [compress_chunk(chunk, self.temp_dir) for chunk in chunks]
 
         # Create categories and channels
         guild = interaction.guild
@@ -97,8 +108,7 @@ class FileSplitter(commands.Cog):
         # Metadata storage
         metadata_md = f""" ```
 File: {file_name}
-Compressed: False
-Encrypted: False
+Compressed: {compress}
 Total Chunks: {len(chunks)}
 First Chunk ID: {first_chunk_id}
 Last Chunk ID: {last_chunk_id}```"""

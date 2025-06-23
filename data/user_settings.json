@@ -1,0 +1,7 @@
+{
+    "DISCORDUSERID": {
+        "encrypt": false,
+        "compress": false,
+        "chunk_size": 8388608
+    }
+}
